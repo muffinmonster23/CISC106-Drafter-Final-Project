@@ -32,12 +32,12 @@ jobs:
       - name: Locate calculator
         shell: bash
         run: |
-          if [ -f circuit_calculator.py ]; then
-            echo "APP_FILE=circuit_calculator.py" >> "$GITHUB_ENV"
-          elif [ -f outputs/circuit_calculator.py ]; then
-            echo "APP_FILE=outputs/circuit_calculator.py" >> "$GITHUB_ENV"
+          if [ -f main.py ]; then
+            echo "APP_FILE=main.py" >> "$GITHUB_ENV"
+          elif [ -f outputs/main.py ]; then
+            echo "APP_FILE=outputs/main.py" >> "$GITHUB_ENV"
           else
-            echo "::error::Cannot find circuit_calculator.py at the root or in outputs."
+            echo "::error::Cannot find main.py at the root or in outputs."
             exit 1
           fi
 
