@@ -2,6 +2,7 @@
 
 Install Drafter:  python -m pip install drafter
 Run this file:    python circuit_calculator.py
+Tests run automatically before the website starts.
 
 Five pages: index, circuit_editor, settings, results, guide.
 Four action routes: add_resistor, remove_resistor, save_settings, calculate.
@@ -19,8 +20,10 @@ AI assisted with this starter. Keep the conversation for the assignment's
 LLM disclosure, and review the code and explanations before submission.
 """
 
+from bakery import assert_equal as assert_equals
 from dataclasses import dataclass
 from math import isfinite
+from html import escape
 
 from drafter import *
 
@@ -94,6 +97,115 @@ def apply_settings(state: State, circuit_type: str,
     return True
 
 
+def diagram_text(x: int, y: int, label: str) -> str:
+    """Wrap a label into 24-character lines without losing its full name.
+
+    Slicing selects each chunk. escape() converts characters such as < and &
+    into safe text so resistor names cannot turn into SVG markup.
+    f-strings insert coordinates into the drawing, not executable Python.
+    """
+    drawing = ""
+    for start in range(0, len(label), 24):
+        line = escape(label[start:start + 24])
+        drawing = drawing + (
+            f'<text x="{x}" y="{y}" fill="#25364a" '
+            f'font-family="Arial, sans-serif" font-size="16">{line}</text>'
+        )
+        y = y + 22
+    return drawing
+
+
+def circuit_diagram(state: State):
+    """Draw every stored resistor, using its actual name and resistance.
+
+    SVG is drawing markup. M moves a pen, H/V draw horizontal/vertical wires,
+    rect draws a resistor, and circle draws the DC supply. These are generated
+    from State each time the editor is shown, so adding/removing updates them.
+
+    Series uses one vertical chain and a return wire. Rotating the familiar
+    horizontal resistor layout keeps any number of resistors readable.
+    Parallel uses two rails and one branch per resistor.
+    Coordinates grow with the number of labels; longer names get more space.
+    Div is an HTML container. Its CSS limits visible height and enables
+    scrolling, keeping 100-resistor diagrams and the form usable together.
+    """
+    if len(state.resistors) == 0:
+        return Div("Add a resistor to see your circuit diagram.")
+
+    wires = ""
+    symbols = ""
+    labels = ""
+    y = 100
+    previous_wire_end = 60
+
+    for resistor in state.resistors:
+        # Integer division rounds up the number of 24-character name lines.
+        name_lines = (len(resistor.name) + 23) // 24
+        value = format(resistor.resistance, ".6g") + " ohms"
+        if state.circuit_type == "Series":
+            wires = wires + f'<path d="M360 {previous_wire_end} V{y - 20}"/>'
+            symbols = symbols + (
+                f'<rect x="345" y="{y - 20}" width="30" height="40"/>'
+            )
+            labels = labels + diagram_text(410, y - 5, resistor.name)
+            labels = labels + diagram_text(410, y - 5 + name_lines * 22, value)
+            previous_wire_end = y + 20
+        else:
+            wires = wires + (
+                f'<path d="M220 {y} H350 M450 {y} H600"/>'
+            )
+            symbols = symbols + (
+                f'<rect x="350" y="{y - 15}" width="100" height="30"/>'
+            )
+            # Dots identify where each branch joins the two shared rails.
+            symbols = symbols + (
+                f'<circle cx="220" cy="{y}" r="4" fill="#25364a"/>'
+                f'<circle cx="600" cy="{y}" r="4" fill="#25364a"/>'
+            )
+            labels = labels + diagram_text(300, y + 36, resistor.name)
+            labels = labels + diagram_text(300, y + 36 + name_lines * 22, value)
+
+        # max() ensures enough room for long names and the next resistor.
+        y = y + max(120, name_lines * 22 + 80)
+
+    bottom = y - 40
+    if state.circuit_type == "Series":
+        wires = wires + (
+            f'<path d="M100 115 V60 H360 M360 {previous_wire_end} '
+            f'V{bottom} H100 V165"/>'
+        )
+    else:
+        wires = wires + (
+            f'<path d="M100 115 V60 H220 V{bottom} H100 V165 '
+            f'M600 60 V{bottom}"/>'
+        )
+
+    labels = labels + diagram_text(145, 140, "Supply")
+    labels = labels + diagram_text(145, 163, format(state.voltage, ".6g") + " V")
+    # Escape every label derived from user data before placing it in markup.
+    title = escape(state.circuit_type + " circuit with "
+                   + str(len(state.resistors)) + " resistors")
+    drawing = (
+        "<title>" + title + "</title>"
+        "<desc>Each resistor is labeled with its stored name and resistance "
+        "in ohms. The supply voltage is shown beside the source.</desc>"
+        '<g fill="none" stroke="#25364a" stroke-width="3">' + wires + '</g>'
+        '<g fill="#eef4fa" stroke="#25364a" stroke-width="3">' + symbols + '</g>'
+        '<circle cx="100" cy="140" r="25" fill="white" '
+        'stroke="#25364a" stroke-width="3"/>'
+        '<text x="100" y="138" text-anchor="middle" font-size="19">+</text>'
+        '<text x="100" y="158" text-anchor="middle" font-size="19">-</text>'
+        + labels
+    )
+    height = bottom + 40
+    # Match display height to viewBox so large circuits scroll instead of
+    # being scaled down into tiny, unreadable symbols.
+    image = SVG(drawing, width=640, height=int(height * 640 / 720),
+                viewBox="0 0 720 " + str(height))
+    return Div(image, style="max-height: 520px; overflow: auto; "
+               "border: 1px solid #d9e1e8; padding: 8px;")
+
+
 # ---------- Page 1: home ----------
 
 @route
@@ -117,6 +229,12 @@ def circuit_editor(state: State) -> Page:
         Header("Build Your Circuit"),
         state.feedback + "\n",
         "Number of resistors: " + str(len(state.resistors)) + "\n",
+        Header("Circuit diagram", 2),
+        "Saved connection type: " + state.circuit_type + "\n",
+        circuit_diagram(state),
+        "The diagram shows your stored resistors. "
+        "Scroll inside it to see larger circuits.\n",
+        "Change the circuit type in Settings, save it, then return here.\n",
     ]
     if len(state.resistors) == 0:
         content.append("No resistors added yet.\n")
@@ -323,8 +441,196 @@ def guide(state: State) -> Page:
     ])
 
 
-# This guard starts the website only when running this file directly.
-# Importing the file for calculation tests does not start a server.
-if __name__ == "__main__":
-    start_server(State([], "Series", 10.0, True, ""))
+# ---------- Equality tests ----------
+# Bakery names its helper assert_equal; "as assert_equals" above gives it
+# the requested local name. Decimal comparisons use Bakery's tolerance.
+# These functions use local State objects so they do not change a user's circuit.
+# They are ordinary functions, not Drafter routes, and run before startup.
 
+def test_valid_number():
+    assert_equals(valid_number("100"), True)
+    assert_equals(valid_number("12.5"), True)
+    assert_equals(valid_number("0"), True)
+    assert_equals(valid_number("-10"), True)  # Numeric; action routes check ranges.
+    assert_equals(valid_number(" 220 "), True)
+    assert_equals(valid_number(""), False)
+    assert_equals(valid_number("hello"), False)
+    assert_equals(valid_number("100 ohms"), False)
+    assert_equals(valid_number("nan"), False)
+    assert_equals(valid_number("inf"), False)
+    assert_equals(valid_number("-inf"), False)
+
+
+def test_equivalent_resistance():
+    pair = [Resistor("R1", 100.0), Resistor("R2", 100.0)]
+    assert_equals(equivalent_resistance(pair, "Series"), 200.0)
+    assert_equals(equivalent_resistance(pair, "Parallel"), 50.0)
+    different = [Resistor("R1", 100.0), Resistor("R2", 200.0)]
+    assert_equals(equivalent_resistance(different, "Series"), 300.0)
+    assert_equals(equivalent_resistance(different, "Parallel"), 66.6666666667)
+    single = [Resistor("R1", 220.0)]
+    assert_equals(equivalent_resistance(single, "Series"), 220.0)
+    assert_equals(equivalent_resistance(single, "Parallel"), 220.0)
+    many = []
+    for number in range(100):
+        many.append(Resistor("R" + str(number + 1), 100.0))
+    assert_equals(equivalent_resistance(many, "Series"), 10000.0)
+    assert_equals(equivalent_resistance(many, "Parallel"), 1.0)
+    # Empty and nonpositive lists are rejected by routes before this helper.
+
+
+def test_add_resistor():
+    state = State([], "Series", 10.0, True, "")
+    page = add_resistor(state, " r1 ", "100")
+    assert_equals(state.resistors, [Resistor("R1", 100.0)])
+    assert_equals(page.state, state)
+    assert_equals(Header("Build Your Circuit") in page.content, True)
+    add_resistor(state, "R2", "220")
+    assert_equals(state.resistors, [Resistor("R1", 100.0), Resistor("R2", 220.0)])
+    # A duplicate name, even with a different case, must not add an object.
+    add_resistor(state, "r1", "330")
+    assert_equals(len(state.resistors), 2)
+    assert_equals("already exists" in state.feedback, True)
+    for invalid_value in ["0", "-1", "hello", "", "nan", "inf"]:
+        add_resistor(state, "R3", invalid_value)
+        assert_equals(len(state.resistors), 2)
+    add_resistor(state, "   ", "100")
+    assert_equals(len(state.resistors), 2)
+
+
+def test_remove_resistor():
+    state = State([Resistor("R1", 100.0), Resistor("R2", 220.0),
+                   Resistor("R3", 330.0)], "Series", 10.0, True, "")
+    page = remove_resistor(state, " r2 ")
+    assert_equals(state.resistors, [Resistor("R1", 100.0), Resistor("R3", 330.0)])
+    assert_equals(page.state, state)
+    remove_resistor(state, "MISSING")
+    assert_equals(len(state.resistors), 2)
+    assert_equals("was found" in state.feedback, True)
+    remove_resistor(state, "")
+    assert_equals(len(state.resistors), 2)
+    remove_resistor(state, "R1")
+    remove_resistor(state, "R3")
+    assert_equals(state.resistors, [])
+    remove_resistor(state, "R1")
+    assert_equals(state.resistors, [])
+
+
+def test_settings():
+    state = State([], "Series", 10.0, True, "")
+    assert_equals(apply_settings(state, "Parallel", "12", False), True)
+    assert_equals(state.circuit_type, "Parallel")
+    assert_equals(state.voltage, 12.0)
+    assert_equals(state.show_steps, False)
+    for bad_voltage in ["-1", "bad", "", "nan", "inf"]:
+        assert_equals(apply_settings(state, "Series", bad_voltage, True), False)
+        assert_equals(state.circuit_type, "Parallel")
+        assert_equals(state.voltage, 12.0)
+        assert_equals(state.show_steps, False)
+    assert_equals(apply_settings(state, "Mixed", "10", True), False)
+    assert_equals(state.circuit_type, "Parallel")
+    page = save_settings(state, "Series", "0", True)
+    assert_equals(state.voltage, 0.0)
+    assert_equals(state.circuit_type, "Series")
+    assert_equals(state.show_steps, True)
+    assert_equals(Header("Circuit Settings") in page.content, True)
+    save_settings(state, "Series", "-5", False)
+    assert_equals(state.voltage, 0.0)
+    assert_equals(state.show_steps, True)
+
+
+def test_calculate_and_results():
+    state = State([Resistor("R1", 100.0), Resistor("R2", 100.0)],
+                  "Series", 10.0, True, "")
+    page = calculate(state, "Series", "10", True)
+    assert_equals("Total resistance: 200 ohms\n" in page.content, True)
+    assert_equals("Total current: 0.05 A\n" in page.content, True)
+    assert_equals(Header("Calculation steps", 2) in page.content, True)
+    # Calculate must apply unsaved form settings before computing totals.
+    page = calculate(state, "Parallel", "10", False)
+    assert_equals(state.circuit_type, "Parallel")
+    assert_equals(state.show_steps, False)
+    assert_equals("Total resistance: 50 ohms\n" in page.content, True)
+    assert_equals("Total current: 0.2 A\n" in page.content, True)
+    assert_equals(Header("Calculation steps", 2) in page.content, False)
+    page = calculate(state, "Parallel", "0", True)
+    assert_equals("Total current: 0 A\n" in page.content, True)
+    # Reopening results after changing resistors must recompute the answer.
+    remove_resistor(state, "R2")
+    page = results(state)
+    assert_equals("Total resistance: 100 ohms\n" in page.content, True)
+    assert_equals(len(state.resistors), 1)
+    page = calculate(state, "Series", "bad", True)
+    assert_equals(Header("Circuit Settings") in page.content, True)
+    assert_equals(state.voltage, 0.0)
+    empty = State([], "Series", 10.0, True, "")
+    page = calculate(empty, "Series", "10", True)
+    assert_equals(Header("Build Your Circuit") in page.content, True)
+    assert_equals("at least one" in empty.feedback, True)
+    page = results(empty)
+    assert_equals(Header("Build Your Circuit") in page.content, True)
+
+
+def test_pages():
+    state = State([], "Series", 10.0, True, "")
+    assert_equals(Header("Circuit Resistance and Current Calculator") in index(state).content, True)
+    assert_equals(Header("Build Your Circuit") in circuit_editor(state).content, True)
+    assert_equals(Header("Circuit Settings") in settings(state).content, True)
+    assert_equals(Header("Circuit Calculation Guide") in guide(state).content, True)
+    assert_equals(isinstance(guide(state), Page), True)
+
+
+def test_diagrams():
+    # diagram_text must display names safely, not interpret them as markup.
+    label = diagram_text(10, 20, "R<1>&")
+    assert_equals("R&lt;1&gt;&amp;" in label, True)
+    assert_equals("<1>" in label, False)
+    assert_equals(diagram_text(10, 20, "A" * 50).count("<text "), 3)
+    empty = State([], "Series", 10.0, True, "")
+    assert_equals("Add a resistor" in circuit_diagram(empty).content[0], True)
+    for connection in ["Series", "Parallel"]:
+        state = State([Resistor("R1", 100.0), Resistor("R2", 220.0)],
+                      connection, 12.0, True, "")
+        # The diagram Div contains an SVG; its content is the drawing text.
+        drawing = circuit_diagram(state).content[0].content
+        assert_equals(drawing.count("<rect "), 2)
+        assert_equals("R1" in drawing, True)
+        assert_equals("R2" in drawing, True)
+        assert_equals("100 ohms" in drawing, True)
+        assert_equals("220 ohms" in drawing, True)
+        assert_equals("12 V" in drawing, True)
+        remove_resistor(state, "R1")
+        drawing = circuit_diagram(state).content[0].content
+        assert_equals(drawing.count("<rect "), 1)
+        assert_equals("R1" in drawing, False)
+        assert_equals("R2" in drawing, True)
+        add_resistor(state, "R3", "330")
+        drawing = circuit_diagram(state).content[0].content
+        assert_equals(drawing.count("<rect "), 2)
+        assert_equals("330 ohms" in drawing, True)
+        many = []
+        for number in range(100):
+            many.append(Resistor("R" + str(number + 1), 100.0))
+        state.resistors = many
+        drawing = circuit_diagram(state).content[0].content
+        assert_equals(drawing.count("<rect "), 100)
+        assert_equals("R100" in drawing, True)
+
+
+def run_tests():
+    test_valid_number()
+    test_equivalent_resistance()
+    test_add_resistor()
+    test_remove_resistor()
+    test_settings()
+    test_calculate_and_results()
+    test_pages()
+    test_diagrams()
+
+
+# The main guard prevents tests and website startup when imported.
+# Running this file checks the functions first, then starts a fresh circuit.
+# Tests use their own local State objects and do not fill the website's list.
+if __name__ == "__main__":
+    run_tests()
+    start_server(State([], "Series", 10.0, True, ""))
