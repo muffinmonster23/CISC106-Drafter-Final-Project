@@ -1,1 +1,94 @@
+name: Deploy circuit calculator to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Drafter
+        run: python -m pip install drafter==2.2.0
+
+      - name: Locate calculator
+        shell: bash
+        run: |
+          if [ -f circuit_calculator.py ]; then
+            echo "APP_FILE=circuit_calculator.py" >> "$GITHUB_ENV"
+          elif [ -f outputs/circuit_calculator.py ]; then
+            echo "APP_FILE=outputs/circuit_calculator.py" >> "$GITHUB_ENV"
+          else
+            echo "::error::Cannot find circuit_calculator.py at the root or in outputs."
+            exit 1
+          fi
+
+      - name: Run equality tests
+        run: |
+          python - <<'PY'
+          import io
+          import os
+          import runpy
+          from contextlib import redirect_stdout
+          from bakery import assert_equal
+
+          # Importing with run_path does not enter the app's main guard.
+          # Run the tests without launching a development server.
+          app = runpy.run_path(os.environ["APP_FILE"])
+          before_tests = assert_equal.student_tests.tests
+          before_failures = assert_equal.student_tests.failures
+          output = io.StringIO()
+          with redirect_stdout(output):
+              app["run_tests"]()
+          total = assert_equal.student_tests.tests - before_tests
+          failed = assert_equal.student_tests.failures - before_failures
+          print(f"Equality tests: {total} assertions, {failed} failures")
+          if failed or total == 0:
+              print(output.getvalue())
+              raise SystemExit(1)
+          PY
+
+      - name: Build static website
+        run: |
+          python "$APP_FILE" --compile --production --output-directory _site
+          test -s _site/index.html
+          touch _site/.nojekyll
+
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
