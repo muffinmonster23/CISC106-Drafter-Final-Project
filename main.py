@@ -28,6 +28,16 @@ from html import escape
 from drafter import *
 
 
+set_website_title("Circuit Resistance Calculator")
+set_site_information(
+    author="Alex Yun",
+    description="Finds the resistance and current of a given circuit",
+    sources="Thanks to the Drafter docs and ChatGPT",
+    planning=["CS1 Final Project 0_ Pick a Problem.docx", "CS1 Final Project 1 Design.docx"],
+    links=["https://github.com/muffinmonster23/Circuit-Resistance-Calculator"]
+)
+set_website_framed(False)
+hide_debug_information()
 @dataclass
 class Resistor:
     """One resistor, identified by a unique name rather than its position."""
