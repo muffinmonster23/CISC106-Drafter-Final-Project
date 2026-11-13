@@ -38,6 +38,7 @@ set_site_information(
 )
 set_website_framed(False)
 hide_debug_information()
+
 @dataclass
 class Resistor:
     """One resistor, identified by a unique name rather than its position."""
@@ -125,7 +126,7 @@ def diagram_text(x: int, y: int, label: str) -> str:
     return drawing
 
 
-def circuit_diagram(state: State):
+def circuit_diagram(state: State) -> Div:
     """Draw every stored resistor, using its actual name and resistance.
 
     SVG is drawing markup. M moves a pen, H/V draw horizontal/vertical wires,
@@ -220,6 +221,7 @@ def circuit_diagram(state: State):
 
 @route
 def index(state: State) -> Page:
+    """Return the home page with links to the circuit editor and guide."""
     return Page(state, [
         Header("Circuit Resistance and Current Calculator"),
         "Build a circuit, choose series or parallel, and find its total "
@@ -235,6 +237,7 @@ def index(state: State) -> Page:
 
 @route
 def circuit_editor(state: State) -> Page:
+    """Return the stored resistor list, circuit diagram, and add/remove controls."""
     content = [
         Header("Build Your Circuit"),
         state.feedback + "\n",
@@ -271,6 +274,7 @@ def circuit_editor(state: State) -> Page:
 
 @route
 def add_resistor(state: State, resistor_name: str, resistance: str) -> Page:
+    """Validate and add a uniquely named positive resistor, then return the editor."""
     # strip() removes surrounding spaces, and upper() normalizes names.
     name = resistor_name.strip().upper()
     if name == "":
@@ -295,6 +299,7 @@ def add_resistor(state: State, resistor_name: str, resistance: str) -> Page:
 
 @route
 def remove_resistor(state: State, remove_name: str) -> Page:
+    """Remove the resistor matching the supplied name and return the editor."""
     name = remove_name.strip().upper()
     if name == "":
         state.feedback = "Enter the name of the resistor to remove."
@@ -322,6 +327,7 @@ def remove_resistor(state: State, remove_name: str) -> Page:
 
 @route
 def settings(state: State) -> Page:
+    """Return the form for connection type, supply voltage, and calculation steps."""
     return Page(state, [
         Header("Circuit Settings"),
         state.feedback + "\n",
@@ -342,6 +348,7 @@ def settings(state: State) -> Page:
 @route
 def save_settings(state: State, circuit_type: str,
                   voltage: str, show_steps: bool) -> Page:
+    """Validate and save the submitted settings, then return the settings page."""
     if apply_settings(state, circuit_type, voltage, show_steps):
         state.feedback = "Settings saved."
     return settings(state)
@@ -350,6 +357,7 @@ def save_settings(state: State, circuit_type: str,
 @route
 def calculate(state: State, circuit_type: str,
               voltage: str, show_steps: bool) -> Page:
+    """Apply submitted settings and return results, or an input page with feedback."""
     # Use the current form, even if the user has not clicked Save settings.
     if not apply_settings(state, circuit_type, voltage, show_steps):
         return settings(state)
@@ -364,6 +372,7 @@ def calculate(state: State, circuit_type: str,
 
 @route
 def results(state: State) -> Page:
+    """Recalculate and display total resistance, current, and optional formula steps."""
     if len(state.resistors) == 0:
         state.feedback = "Add at least one resistor before viewing results."
         return circuit_editor(state)
@@ -423,6 +432,7 @@ def results(state: State) -> Page:
 
 @route
 def guide(state: State) -> Page:
+    """Return instructions, formulas, units, and worked examples for both circuit types."""
     return Page(state, [
         Header("Circuit Calculation Guide"),
         Header("How to use the calculator", 2),
@@ -457,7 +467,8 @@ def guide(state: State) -> Page:
 # These functions use local State objects so they do not change a user's circuit.
 # They are ordinary functions, not Drafter routes, and run before startup.
 
-def test_valid_number():
+def test_valid_number() -> None:
+    """Check numeric input parsing, including invalid and nonfinite values."""
     assert_equals(valid_number("100"), True)
     assert_equals(valid_number("12.5"), True)
     assert_equals(valid_number("0"), True)
@@ -471,7 +482,8 @@ def test_valid_number():
     assert_equals(valid_number("-inf"), False)
 
 
-def test_equivalent_resistance():
+def test_equivalent_resistance() -> None:
+    """Check series and parallel totals for one, two, and 100 resistors."""
     pair = [Resistor("R1", 100.0), Resistor("R2", 100.0)]
     assert_equals(equivalent_resistance(pair, "Series"), 200.0)
     assert_equals(equivalent_resistance(pair, "Parallel"), 50.0)
@@ -489,7 +501,8 @@ def test_equivalent_resistance():
     # Empty and nonpositive lists are rejected by routes before this helper.
 
 
-def test_add_resistor():
+def test_add_resistor() -> None:
+    """Check valid additions, normalized names, duplicates, and invalid resistance."""
     state = State([], "Series", 10.0, True, "")
     page = add_resistor(state, " r1 ", "100")
     assert_equals(state.resistors, [Resistor("R1", 100.0)])
@@ -508,7 +521,8 @@ def test_add_resistor():
     assert_equals(len(state.resistors), 2)
 
 
-def test_remove_resistor():
+def test_remove_resistor() -> None:
+    """Check removal by name, missing names, and removal of the final resistor."""
     state = State([Resistor("R1", 100.0), Resistor("R2", 220.0),
                    Resistor("R3", 330.0)], "Series", 10.0, True, "")
     page = remove_resistor(state, " r2 ")
@@ -526,7 +540,8 @@ def test_remove_resistor():
     assert_equals(state.resistors, [])
 
 
-def test_settings():
+def test_settings() -> None:
+    """Check settings updates, rejected inputs, zero voltage, and the returned page."""
     state = State([], "Series", 10.0, True, "")
     assert_equals(apply_settings(state, "Parallel", "12", False), True)
     assert_equals(state.circuit_type, "Parallel")
@@ -549,7 +564,8 @@ def test_settings():
     assert_equals(state.show_steps, True)
 
 
-def test_calculate_and_results():
+def test_calculate_and_results() -> None:
+    """Check displayed totals, current settings, fresh results, and invalid inputs."""
     state = State([Resistor("R1", 100.0), Resistor("R2", 100.0)],
                   "Series", 10.0, True, "")
     page = calculate(state, "Series", "10", True)
@@ -581,7 +597,8 @@ def test_calculate_and_results():
     assert_equals(Header("Build Your Circuit") in page.content, True)
 
 
-def test_pages():
+def test_pages() -> None:
+    """Check that home, editor, settings, and guide produce their expected page titles."""
     state = State([], "Series", 10.0, True, "")
     assert_equals(Header("Circuit Resistance and Current Calculator") in index(state).content, True)
     assert_equals(Header("Build Your Circuit") in circuit_editor(state).content, True)
@@ -590,7 +607,8 @@ def test_pages():
     assert_equals(isinstance(guide(state), Page), True)
 
 
-def test_diagrams():
+def test_diagrams() -> None:
+    """Check diagram labels, escaping, wrapping, additions, removals, and large circuits."""
     # diagram_text must display names safely, not interpret them as markup.
     label = diagram_text(10, 20, "R<1>&")
     assert_equals("R&lt;1&gt;&amp;" in label, True)
@@ -627,7 +645,8 @@ def test_diagrams():
         assert_equals("R100" in drawing, True)
 
 
-def run_tests():
+def run_tests() -> None:
+    """Run all equality test groups using local circuit states before website startup."""
     test_valid_number()
     test_equivalent_resistance()
     test_add_resistor()
