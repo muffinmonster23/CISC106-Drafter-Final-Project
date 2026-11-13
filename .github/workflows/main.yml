@@ -27,7 +27,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Drafter
-        run: python -m pip install drafter==latest
+        run: python -m pip install drafter==2.2.0
 
       - name: Locate calculator
         shell: bash
